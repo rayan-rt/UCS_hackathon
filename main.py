@@ -17,7 +17,11 @@ def detect_signals(query: str, response: str) -> list[str]:
     r = response.lower()
 
     # Future claims
-    if "who won" in q and "2026" in q:
+    if "will" in q and "who will win" in q and "2026" in q:
+        signals.append("future_claim")
+
+    # Future claims
+    if "will" in r and "2026" in r:
         signals.append("future_claim")
 
     # Medical domain
@@ -25,8 +29,20 @@ def detect_signals(query: str, response: str) -> list[str]:
     if any(k in q for k in medical_keywords):
         signals.append("medical_domain")
 
-        if "consult a professional" not in r:
+        if "consult" not in r:
             signals.append("missing_disclaimer")
+
+    # Toxicity
+    toxic_keywords = ["hate", "kill", "stupid", "attack", "violence"]
+    if any(k in q for k in toxic_keywords) or any(k in r for k in toxic_keywords):
+        signals.append("toxic_tone")
+
+    # Hallucination (Heuristic)
+    if any(
+        phrase in r
+        for phrase in ["i think", "maybe", "hypothetically", "i am not sure but"]
+    ):
+        signals.append("potential_hallucination")
 
     return signals
 
@@ -53,29 +69,12 @@ def should_escalate(intent: str, signals: list[str]) -> tuple[bool, float]:
     return risk >= threshold, round(risk, 2)
 
 
-def get_learned_lessons():
-    try:
-        with open("human_feedback.json", "r") as f:
-            feedbacks = json.load(f)
-            # Only use corrections to teach the model what NOT to do
-            lessons = [
-                f"User: {fb['query']}\nAvoid this mistake: {fb['notes']}"
-                for fb in feedbacks
-                if fb["human_decision"] == "incorrect"
-            ]
-            return "\n".join(lessons[-3:])  # Only last 3 to save tokens
-    except FileNotFoundError:
-        return ""
-
-
 # ---------------------------
 # Layer 1: LLM Call
 # ---------------------------
 
 
 def call_llm(api_key: str, query: str) -> str:
-    # lessons = get_learned_lessons()
-
     llm = ChatGroq(api_key=api_key, model="llama-3.3-70b-versatile")
 
     prompt = ChatPromptTemplate.from_messages(
@@ -109,7 +108,6 @@ class FeedbackRequest(BaseModel):
     response: str
     human_decision: str
     notes: str
-    # Optional: if you want to keep the 'signal' logic
     signal: str = "general"
 
 
@@ -117,11 +115,17 @@ class FeedbackRequest(BaseModel):
 async def ask_llm(req: QueryRequest):
     response = call_llm(req.api_key, req.prompt)
 
-    intent = (
-        "medical"
-        if any(k in req.prompt.lower() for k in ["cancer", "treatment", "diagnosis"])
-        else "general"
-    )
+    prompt_lower = req.prompt.lower()
+    if any(k in prompt_lower for k in ["cancer", "treatment", "diagnosis", "medicine"]):
+        intent = "medical"
+    elif any(k in prompt_lower for k in ["2026", "future", "predict", "will happen"]):
+        intent = "future"
+    elif any(k in prompt_lower for k in ["hate", "kill", "stupid", "attack"]):
+        intent = "toxicity"
+    elif any(k in prompt_lower for k in ["fact check", "is it true", "real or fake"]):
+        intent = "hallucination"
+    else:
+        intent = "general"
 
     signals = detect_signals(req.prompt, response)
     escalate, risk = should_escalate(intent, signals)
@@ -141,17 +145,32 @@ async def ask_llm(req: QueryRequest):
 
 
 @app.post("/feedback")
-async def update_policy(req: FeedbackRequest):
-    policy = load_policy()
+async def save_feedback(req: FeedbackRequest):
+    new_feedback = {
+        "query": req.query,
+        "response": req.response,
+        "human_decision": req.human_decision,
+        "notes": req.notes,
+        "signal": req.signal,
+    }
 
-    # Logic: If human says it's safe, reduce the risk weight of that signal
-    if req.human_decision == "correct" and req.signal in policy["signal_weights"]:
-        policy["signal_weights"][req.signal] *= 0.5  # "Learning" to be less strict
+    try:
+        try:
+            with open("human_feedback.json", "r") as f:
+                feedbacks = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            feedbacks = []
 
-    with open("policy_config.json", "w") as f:
-        json.dump(policy, f)
+        feedbacks.append(new_feedback)
 
-    return {"message": "System performance improved based on feedback."}
+        with open("human_feedback.json", "w") as f:
+            json.dump(feedbacks, f, indent=4)
+
+        return {"message": "Feedback recorded for human review."}
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to save feedback: {str(e)}"
+        )
 
 
 # ---------------------------

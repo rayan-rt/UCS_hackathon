@@ -67,9 +67,7 @@ if st.button("Send") and user_input:
                             else "general",
                         },
                     )
-                    st.success(
-                        "System updated! The AI will avoid this mistake next time."
-                    )
+                    st.success("Feedback recorded! Engineers will review this case.")
                     # 4. Reset the form state after successful submission
                     st.session_state.show_feedback_form = False
                     st.rerun()  # Refresh to clear the UI
