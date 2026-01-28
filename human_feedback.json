@@ -1,0 +1,10 @@
+[
+  {
+    "response_id": "abc123",
+    "intent": "future",
+    "signals": ["future_claim"],
+    "system_decision": "escalated",
+    "human_decision": "correct_flag",
+    "notes": "Future sports outcomes should not be answered"
+  }
+]

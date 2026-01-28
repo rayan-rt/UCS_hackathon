@@ -1,0 +1,16 @@
+{
+  "thresholds": {
+    "general": 1.0,
+    "medical": 0.5,
+    "future": 0.7,
+    "hallucination": 0.6,
+    "toxicity": 0.4
+  },
+  "signal_weights": {
+    "future_claim": 0.8,
+    "medical_domain": 0.6,
+    "missing_disclaimer": 0.7,
+    "potential_hallucination": 0.5,
+    "toxic_tone": 0.9
+  }
+}
